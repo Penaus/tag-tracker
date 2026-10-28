@@ -29,6 +29,7 @@ android {
         if (ks) {
             release {
                 storeFile file(ks)
+                storeType "pkcs12"
                 storePassword System.getenv("ANDROID_KEYSTORE_PASSWORD")
                 keyAlias System.getenv("ANDROID_KEY_ALIAS")
                 keyPassword System.getenv("ANDROID_KEY_PASSWORD")
@@ -38,7 +39,9 @@ android {
 
     buildTypes {
         release {
-            minifyEnabled false
+            minifyEnabled true       // R8: shrink + obfuscate the APK
+            shrinkResources true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
             // Without a keystore secret the release build falls back to the debug key.
             signingConfig ks ? signingConfigs.release : signingConfigs.debug
         }
