@@ -85,20 +85,53 @@ def list_tags_json() -> str:
 
 # ---------- polling ----------
 
+def _log_check(duration_ms: int, added: int, ok: bool):
+    """Keep a short rolling log of background checks so users can SEE the battery activity."""
+    s = _load_status()
+    log = s.get("check_log", [])
+    log.append({"ts": int(time.time()), "ms": int(duration_ms), "added": int(added), "ok": bool(ok)})
+    _save_status(check_log=log[-60:])  # keep last ~60 checks
+
+
+def battery_log() -> str:
+    """Returns the check history + simple stats for the Battery/Activity screen."""
+    s = _load_status()
+    log = s.get("check_log", [])
+    now = int(time.time())
+    day = [c for c in log if now - c["ts"] < 86400]
+    avg_ms = round(sum(c["ms"] for c in log) / len(log)) if log else 0
+    active_s_day = round(sum(c["ms"] for c in day) / 1000.0, 1)
+    return json.dumps({
+        "checks": list(reversed(log))[:40],
+        "checks_today": len(day),
+        "avg_ms": avg_ms,
+        "active_seconds_today": active_s_day,  # total CPU time spent checking today
+        "interval_note": "No GPS. Each check wakes for a few seconds, then sleeps.",
+    })
+
+
 def poll() -> int:
     """Runs one check of all tags. Returns number of new locations."""
     from server import finder, poller
     _save_status(running=True)
+    _t0 = time.time()
+    added = 0
+    ok = True
     try:
         added = poller.poll_once()
         _save_status(running=False, last_run=int(time.time()), last_error=poller.status["last_error"],
                      last_added=added)
         return added
     except BaseException as e:  # SystemExit from the library must not kill the app
+        ok = False
         traceback.print_exc()
         _save_status(running=False, last_run=int(time.time()), last_error=str(e) or type(e).__name__)
         return 0
     finally:
+        try:
+            _log_check((time.time() - _t0) * 1000, added, ok)
+        except Exception:
+            pass
         # Auto-sync new points to the default Drive folder (fresh token minted each time,
         # so it keeps working 24/7 with no re-login). Best-effort; never fails the poll.
         try:

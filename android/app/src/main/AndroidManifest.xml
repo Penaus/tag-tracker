@@ -55,6 +55,11 @@
             android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|uiMode"
             android:exported="false" />
 
+        <activity
+            android:name=".BatteryActivity"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|uiMode"
+            android:exported="false" />
+
         <receiver
             android:name=".RingReceiver"
             android:exported="false" />

@@ -30,7 +30,7 @@ import java.util.Date;
 /** Setup and settings: Google connection, background checking, Google Drive backup. */
 public class SettingsActivity extends Activity {
     private static final int REQ_SIGN_IN = 1, REQ_UNLOCK = 2, REQ_DRIVE_FILE = 3, REQ_RESTORE = 4, REQ_IMPORT = 5;
-    private static final int[] INTERVALS = {15, 30, 60, 120};
+    private static final int[] INTERVALS = {15, 30, 60, 120, 240};
 
     private LinearLayout root;
     private TextView status;
@@ -162,6 +162,9 @@ public class SettingsActivity extends Activity {
             rowI.addView(b);
         }
         root.addView(rowI);
+        note("Longer interval = less battery. 240 min is the battery-saver option. See exactly what the app "
+                + "does and its tiny active time in Battery & activity:");
+        button("Battery & activity →", v -> startActivity(new Intent(this, BatteryActivity.class)));
         if (!isIgnoringBattery()) {
             note("Optional: only if your phone (Xiaomi/Samsung/etc.) aggressively kills background apps, allow "
                     + "unrestricted running so checks aren't skipped. Not required on most phones.");
