@@ -169,7 +169,7 @@ def _register_listener() -> str:
     return receiver.credentials["fcm"]["registration"]["token"]
 
 
-def locate(canonic_id: str, timeout: float = 90) -> list[dict]:
+def locate(canonic_id: str, timeout: float = 45) -> list[dict]:
     """Asks Google for the tag's recent locations and returns decrypted points."""
     _ensure_imported()
     from NovaApi.ExecuteAction.LocateTracker.location_request import create_location_request
