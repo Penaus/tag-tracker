@@ -26,6 +26,22 @@
   L.control.layers(control, null, { position: 'topright' }).addTo(map);
   map.on('baselayerchange', (e) => { applyImagery(e.name); store.set('layer', e.name); });
 
+  // "Center on tag" control
+  const Recenter = L.Control.extend({
+    options: { position: 'topright' },
+    onAdd() {
+      const b = L.DomUtil.create('button', 'leaflet-bar recenter-btn');
+      b.innerHTML = '◎'; b.title = 'Center on tag';
+      L.DomEvent.on(b, 'click', (ev) => {
+        L.DomEvent.stop(ev);
+        const d = devices.find((x) => x.id === deviceId);
+        if (d && d.last_lat != null) map.setView([d.last_lat, d.last_lon], 16);
+      });
+      return b;
+    },
+  });
+  map.addControl(new Recenter());
+
   const layers = { track: L.layerGroup().addTo(map), points: L.layerGroup().addTo(map), live: L.layerGroup().addTo(map), play: L.layerGroup().addTo(map) };
   let devices = [], deviceId = store.get('device'), range = { h: store.get('range') || '168' };
   let points = [], fitted = false, playTimer = null;
@@ -69,6 +85,20 @@
     return 2 * R * Math.asin(Math.sqrt(h));
   }
   const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+  // Reverse-geocode a point to a short address (OpenStreetMap Nominatim), cached per ~11m.
+  const addrCache = {};
+  async function addressFor(lat, lon) {
+    const k = lat.toFixed(4) + ',' + lon.toFixed(4);
+    if (addrCache[k] !== undefined) return addrCache[k];
+    try {
+      const r = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=16&lat=${lat}&lon=${lon}`,
+        { headers: { 'Accept': 'application/json' } });
+      const j = await r.json();
+      const a = j && j.display_name ? j.display_name.split(',').slice(0, 3).join(',').trim() : '';
+      addrCache[k] = a; return a;
+    } catch (e) { addrCache[k] = ''; return ''; }
+  }
 
   function currentRange() {
     const now = Math.floor(Date.now() / 1000);
@@ -155,8 +185,12 @@
       return;
     }
     el.innerHTML = `<b>${esc(d.name)}</b><br>Last seen at ${fmt(d.last_ts)} <span class="muted">(${ago(d.last_ts)})</span><br>`
+      + `<span id="addr" class="muted">📍 finding address…</span><br>`
       + `<span class="muted">${d.point_count.toLocaleString()} locations stored in total</span>`
       + (d.last_error ? `<br><span class="error small">${esc(d.last_error)}</span>` : '');
+    addressFor(d.last_lat, d.last_lon).then((a) => {
+      const ae = $('addr'); if (ae) ae.textContent = a ? '📍 ' + a : `📍 ${d.last_lat.toFixed(5)}, ${d.last_lon.toFixed(5)}`;
+    });
     const ll = [d.last_lat, d.last_lon];
     if (d.last_accuracy) L.circle(ll, { radius: d.last_accuracy, color: d.color, weight: 1, fillOpacity: 0.12 }).addTo(layers.live);
     L.circleMarker(ll, { radius: 9, color: '#fff', weight: 3, fillColor: d.color, fillOpacity: 1 })
@@ -313,6 +347,16 @@
     if (!deviceId) return;
     try { await data.sound(deviceId); $('pollStatus').textContent = 'Ringing the tag…'; }
     catch (e) { alert(e.message); }
+  });
+  $('share').addEventListener('click', async () => {
+    const d = devices.find((x) => x.id === deviceId);
+    if (!d || d.last_lat == null) { alert('No location yet to share.'); return; }
+    const addr = await addressFor(d.last_lat, d.last_lon);
+    const text = `${d.name} — last seen ${fmt(d.last_ts)}\n${addr ? addr + '\n' : ''}`
+      + `https://www.google.com/maps?q=${d.last_lat},${d.last_lon}`;
+    if (NATIVE && NATIVE.share) NATIVE.share(text);
+    else if (navigator.share) { try { await navigator.share({ title: d.name, text }); } catch (e) {} }
+    else { try { await navigator.clipboard.writeText(text); alert('Location copied to clipboard'); } catch (e) { prompt('Copy:', text); } }
   });
   $('rename').addEventListener('click', async () => {
     const d = devices.find((x) => x.id === deviceId); if (!d) return;

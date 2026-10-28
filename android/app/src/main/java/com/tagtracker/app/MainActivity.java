@@ -110,6 +110,16 @@ public class MainActivity extends Activity {
         }
 
         @JavascriptInterface
+        public void share(String text) {
+            runOnUiThread(() -> {
+                Intent i = new Intent(Intent.ACTION_SEND);
+                i.setType("text/plain");
+                i.putExtra(Intent.EXTRA_TEXT, text);
+                startActivity(Intent.createChooser(i, "Share location"));
+            });
+        }
+
+        @JavascriptInterface
         public void setParked(boolean parked) {
             TagApp.prefs(MainActivity.this).edit().putBoolean(TagApp.KEY_GUARD, parked).apply();
             if (parked) {

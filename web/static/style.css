@@ -110,6 +110,8 @@ input:focus, select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px c
 .leaflet-control-layers, .leaflet-bar { border-radius: 10px !important; box-shadow: var(--shadow-sm) !important; border: 1px solid var(--border) !important; }
 .leaflet-control-layers { background: var(--surface) !important; color: var(--text); }
 .leaflet-bar a { background: var(--surface) !important; color: var(--text) !important; border-color: var(--border) !important; }
+.recenter-btn { width: 36px; height: 36px; cursor: pointer; background: var(--surface); border: 1px solid var(--border) !important; border-radius: 10px !important; font-size: 18px; color: var(--accent); box-shadow: var(--shadow-sm); display: block; }
+.recenter-btn:hover { background: var(--chip); }
 
 @media (max-width: 640px) {
   #panel { top: auto; bottom: 0; left: 0; right: 0; width: auto; max-height: 62%; border-radius: 18px 18px 0 0; padding-bottom: env(safe-area-inset-bottom); }
