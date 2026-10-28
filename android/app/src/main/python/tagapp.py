@@ -299,27 +299,34 @@ def set_phone_id(phone_id: str):
 
 def license_state(phone_id: str = "") -> dict:
     from server import license as lic
+    s = _load_status()
     if not phone_id:
-        phone_id = _load_status().get("phone_id", "")
-    key = _load_status().get("license_key")
+        phone_id = s.get("phone_id", "")
+    key = s.get("license_key")
     if not key:
         return {"licensed": False, "tags": lic.FREE_TAGS, "free_hours": lic.FREE_HISTORY_HOURS,
                 "reason": "", "expiry": 0}
-    r = lic.verify(key, phone_id)
+    r = lic.verify(key, phone_id, s.get("license_activated", 0))
     r["free_hours"] = lic.FREE_HISTORY_HOURS
     return r
 
 
 def set_license(key: str, phone_id: str) -> str:
     from server import license as lic
-    r = lic.verify((key or "").strip(), phone_id)
+    key = (key or "").strip()
+    now = int(time.time())
+    r = lic.verify(key, phone_id, now)  # start the clock at 'now' for duration keys
     if r["licensed"]:
-        _save_status(license_key=(key or "").strip())
+        s = _load_status()
+        # Re-entering the SAME key keeps its original activation (doesn't restart the clock).
+        activated = s.get("license_activated", 0) if s.get("license_key") == key and s.get("license_activated") else now
+        _save_status(license_key=key, license_activated=activated)
+        r = lic.verify(key, phone_id, activated)
     return json.dumps(r)
 
 
 def clear_license():
-    _save_status(license_key=None)
+    _save_status(license_key=None, license_activated=0)
 
 
 def devices_json(interval_minutes: int, backup_enabled: bool, parked: bool = False, phone_id: str = "") -> str:
