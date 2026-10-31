@@ -110,6 +110,16 @@ public class MainActivity extends Activity {
         }
 
         @JavascriptInterface
+        public void share(String text) {
+            runOnUiThread(() -> {
+                Intent i = new Intent(Intent.ACTION_SEND);
+                i.setType("text/plain");
+                i.putExtra(Intent.EXTRA_TEXT, text);
+                startActivity(Intent.createChooser(i, "Share location"));
+            });
+        }
+
+        @JavascriptInterface
         public void setParked(boolean parked) {
             TagApp.prefs(MainActivity.this).edit().putBoolean(TagApp.KEY_GUARD, parked).apply();
             if (parked) {
@@ -225,6 +235,7 @@ public class MainActivity extends Activity {
         menu.add(0, 1, 0, "Check for locations now");
         menu.add(0, 2, 0, "Refresh");
         menu.add(0, 3, 0, "Setup & settings");
+        menu.add(0, 6, 0, "Battery & activity");
         menu.add(0, 5, 0, "Tag Tracker Pro");
         menu.add(0, 4, 0, "Help");
         return true;
@@ -248,6 +259,9 @@ public class MainActivity extends Activity {
                 return true;
             case 5:
                 startActivity(new Intent(this, LicenseActivity.class));
+                return true;
+            case 6:
+                startActivity(new Intent(this, BatteryActivity.class));
                 return true;
         }
         return super.onOptionsItemSelected(item);

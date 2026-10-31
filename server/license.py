@@ -26,8 +26,11 @@ def _b64d(s: str) -> bytes:
     return base64.urlsafe_b64decode(s + "=" * (-len(s) % 4))
 
 
-def verify(key: str, device_id: str) -> dict:
-    """Returns {'licensed': bool, 'tags': int, 'expiry': int, 'reason': str}."""
+def verify(key: str, device_id: str, activated_ts: int = 0) -> dict:
+    """Returns {'licensed','tags','expiry','dur','reason'}.
+    Expiry can be absolute ("e") or a DURATION in days from activation ("dur").
+    For "dur" keys, pass activated_ts (when the buyer first entered the key); the clock
+    starts then, so "7 days" = 7 days from activation, not from generation."""
     try:
         payload_b64, sig_b64 = key.strip().split(".")
         payload = _b64d(payload_b64)
@@ -35,10 +38,15 @@ def verify(key: str, device_id: str) -> dict:
         Ed25519PublicKey.from_public_bytes(bytes.fromhex(PUBLIC_KEY_HEX)).verify(sig, payload)
         data = json.loads(payload)
     except (ValueError, InvalidSignature, Exception):
-        return {"licensed": False, "tags": FREE_TAGS, "reason": "Invalid or corrupted key"}
+        return {"licensed": False, "tags": FREE_TAGS, "dur": 0, "reason": "Invalid or corrupted key"}
     if data.get("d") not in ("*", device_id):
-        return {"licensed": False, "tags": FREE_TAGS, "reason": "This key belongs to a different phone"}
-    exp = int(data.get("e", 0) or 0)
-    if exp and time.time() > exp:
-        return {"licensed": False, "tags": FREE_TAGS, "reason": "Key expired"}
-    return {"licensed": True, "tags": int(data.get("t", 1)), "expiry": exp, "reason": ""}
+        return {"licensed": False, "tags": FREE_TAGS, "dur": 0, "reason": "This key belongs to a different phone"}
+    now = int(time.time())
+    exp = int(data.get("e", 0) or 0)          # absolute expiry epoch (0 = none)
+    dur = int(data.get("dur", 0) or 0)        # days-from-activation (0 = none)
+    if dur and activated_ts:
+        exp_from_activation = int(activated_ts) + dur * 86400
+        exp = exp_from_activation if not exp else min(exp, exp_from_activation)
+    if exp and now > exp:
+        return {"licensed": False, "tags": FREE_TAGS, "dur": dur, "reason": "Key expired"}
+    return {"licensed": True, "tags": int(data.get("t", 1)), "expiry": exp, "dur": dur, "reason": ""}

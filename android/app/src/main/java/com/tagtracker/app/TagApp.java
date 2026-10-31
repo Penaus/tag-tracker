@@ -57,19 +57,24 @@ public class TagApp extends Application {
     }
 
     static int intervalMinutes(Context ctx) {
-        return prefs(ctx).getInt(KEY_INTERVAL, 15);
+        return prefs(ctx).getInt(KEY_INTERVAL, 30);  // 30 min default = fewer wakeups, less battery
     }
 
     static int backupMinutes(Context ctx) {
         return prefs(ctx).getInt(KEY_BACKUP_MINUTES, 60);
     }
 
-    /** Stable per-device id used to bind a license key to one phone. */
-    @android.annotation.SuppressLint("HardwareIds")
+    /** Stable per-install id used to bind a license key to one phone.
+     *  Stored in SharedPreferences so it SURVIVES app updates (unlike ANDROID_ID, which changes
+     *  when the signing key changes). Only resets on uninstall / clear-data. */
     static String deviceId(Context ctx) {
-        String id = android.provider.Settings.Secure.getString(
-                ctx.getContentResolver(), android.provider.Settings.Secure.ANDROID_ID);
-        return (id == null || id.isEmpty()) ? "unknown" : id;
+        SharedPreferences p = prefs(ctx);
+        String id = p.getString("device_uuid", null);
+        if (id == null || id.isEmpty()) {
+            id = "TT-" + java.util.UUID.randomUUID().toString().substring(0, 13).toUpperCase();
+            p.edit().putString("device_uuid", id).apply();
+        }
+        return id;
     }
 
     // ---------- app lock ----------

@@ -85,20 +85,53 @@ def list_tags_json() -> str:
 
 # ---------- polling ----------
 
+def _log_check(duration_ms: int, added: int, ok: bool):
+    """Keep a short rolling log of background checks so users can SEE the battery activity."""
+    s = _load_status()
+    log = s.get("check_log", [])
+    log.append({"ts": int(time.time()), "ms": int(duration_ms), "added": int(added), "ok": bool(ok)})
+    _save_status(check_log=log[-60:])  # keep last ~60 checks
+
+
+def battery_log() -> str:
+    """Returns the check history + simple stats for the Battery/Activity screen."""
+    s = _load_status()
+    log = s.get("check_log", [])
+    now = int(time.time())
+    day = [c for c in log if now - c["ts"] < 86400]
+    avg_ms = round(sum(c["ms"] for c in log) / len(log)) if log else 0
+    active_s_day = round(sum(c["ms"] for c in day) / 1000.0, 1)
+    return json.dumps({
+        "checks": list(reversed(log))[:40],
+        "checks_today": len(day),
+        "avg_ms": avg_ms,
+        "active_seconds_today": active_s_day,  # total CPU time spent checking today
+        "interval_note": "No GPS. Each check wakes for a few seconds, then sleeps.",
+    })
+
+
 def poll() -> int:
     """Runs one check of all tags. Returns number of new locations."""
     from server import finder, poller
     _save_status(running=True)
+    _t0 = time.time()
+    added = 0
+    ok = True
     try:
         added = poller.poll_once()
         _save_status(running=False, last_run=int(time.time()), last_error=poller.status["last_error"],
                      last_added=added)
         return added
     except BaseException as e:  # SystemExit from the library must not kill the app
+        ok = False
         traceback.print_exc()
         _save_status(running=False, last_run=int(time.time()), last_error=str(e) or type(e).__name__)
         return 0
     finally:
+        try:
+            _log_check((time.time() - _t0) * 1000, added, ok)
+        except Exception:
+            pass
         # Auto-sync new points to the default Drive folder (fresh token minted each time,
         # so it keeps working 24/7 with no re-login). Best-effort; never fails the poll.
         try:
@@ -299,27 +332,34 @@ def set_phone_id(phone_id: str):
 
 def license_state(phone_id: str = "") -> dict:
     from server import license as lic
+    s = _load_status()
     if not phone_id:
-        phone_id = _load_status().get("phone_id", "")
-    key = _load_status().get("license_key")
+        phone_id = s.get("phone_id", "")
+    key = s.get("license_key")
     if not key:
         return {"licensed": False, "tags": lic.FREE_TAGS, "free_hours": lic.FREE_HISTORY_HOURS,
                 "reason": "", "expiry": 0}
-    r = lic.verify(key, phone_id)
+    r = lic.verify(key, phone_id, s.get("license_activated", 0))
     r["free_hours"] = lic.FREE_HISTORY_HOURS
     return r
 
 
 def set_license(key: str, phone_id: str) -> str:
     from server import license as lic
-    r = lic.verify((key or "").strip(), phone_id)
+    key = (key or "").strip()
+    now = int(time.time())
+    r = lic.verify(key, phone_id, now)  # start the clock at 'now' for duration keys
     if r["licensed"]:
-        _save_status(license_key=(key or "").strip())
+        s = _load_status()
+        # Re-entering the SAME key keeps its original activation (doesn't restart the clock).
+        activated = s.get("license_activated", 0) if s.get("license_key") == key and s.get("license_activated") else now
+        _save_status(license_key=key, license_activated=activated)
+        r = lic.verify(key, phone_id, activated)
     return json.dumps(r)
 
 
 def clear_license():
-    _save_status(license_key=None)
+    _save_status(license_key=None, license_activated=0)
 
 
 def devices_json(interval_minutes: int, backup_enabled: bool, parked: bool = False, phone_id: str = "") -> str:
