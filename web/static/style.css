@@ -78,6 +78,8 @@ input:focus, select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px c
 
 .latest { background: var(--surface-2); border: 1px solid var(--border); border-radius: 12px; padding: 11px 13px; font-size: 13px; }
 .latest b { font-size: 14px; }
+.dirlink { display: inline-block; margin-top: 7px; color: var(--accent); font-weight: 600; text-decoration: none; padding: 5px 10px; border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent); border-radius: 8px; }
+.dirlink:hover { background: color-mix(in srgb, var(--accent) 12%, transparent); }
 
 .park { width: 100%; font-weight: 700; font-size: 15px; padding: 13px; border-radius: 12px; letter-spacing: -.01em; }
 .park.riding { background: color-mix(in srgb, var(--success) 14%, var(--surface)); color: var(--success); border-color: color-mix(in srgb, var(--success) 45%, transparent); }

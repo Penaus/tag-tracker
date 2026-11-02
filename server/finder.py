@@ -184,9 +184,23 @@ def locate(canonic_id: str, timeout: float = 45) -> list[dict]:
     with _dispatch_lock:
         _pending[request_uuid] = slot
     try:
-        nova_request(NOVA_ACTION_API_SCOPE, create_location_request(canonic_id, fcm_token, request_uuid))
+        # Retry the network request on transient connectivity/DNS errors (e.g. a brief
+        # "Failed to resolve android.clients.google.com" when the phone's network blips).
+        last_err = None
+        for attempt in range(3):
+            try:
+                nova_request(NOVA_ACTION_API_SCOPE, create_location_request(canonic_id, fcm_token, request_uuid))
+                last_err = None
+                break
+            except Exception as e:
+                last_err = e
+                import time as _t
+                _t.sleep(2 * (attempt + 1))
+        if last_err is not None:
+            raise RuntimeError("Network problem reaching Google (check internet): %s" % last_err)
         if not slot["event"].wait(timeout):
-            raise TimeoutError("No location response from Google within %ss" % timeout)
+            raise TimeoutError("No recent location yet — the tag hasn't been seen by a nearby phone. "
+                               "It updates when someone's Android passes near it; try again later.")
     finally:
         with _dispatch_lock:
             _pending.pop(request_uuid, None)
