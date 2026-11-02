@@ -157,7 +157,10 @@ def _on_fcm_message(hex_string: str):
         slot["event"].set()
 
 
-def _register_listener() -> str:
+def _register_listener() -> tuple[str, bool]:
+    """Returns (fcm_token, cold_start). cold_start is True when the FCM socket was just
+    (re)opened, so the caller should let it settle before firing a request — otherwise
+    Google's push can arrive before the socket is listening and get lost."""
     global _listener_registered
     from Auth.fcm_receiver import FcmReceiver
 
@@ -165,8 +168,8 @@ def _register_listener() -> str:
     if not _listener_registered:
         token = receiver.register_for_location_updates(_on_fcm_message)
         _listener_registered = True
-        return token
-    return receiver.credentials["fcm"]["registration"]["token"]
+        return token, True
+    return receiver.credentials["fcm"]["registration"]["token"], False
 
 
 def locate(canonic_id: str, timeout: float = 90) -> list[dict]:
@@ -178,7 +181,17 @@ def locate(canonic_id: str, timeout: float = 90) -> list[dict]:
     from NovaApi.util import generate_random_uuid
     from ProtoDecoders.decoder import parse_device_update_protobuf
 
-    fcm_token = _register_listener()
+    import time as _t
+    _clock = _t.time
+    t_start = _clock()
+    fcm_token, cold_start = _register_listener()
+    t_reg = _clock() - t_start
+    # On a cold start the FCM socket has just opened and may not be listening yet. If we fire
+    # the request now, Google can push the reply before we can catch it and it is lost (this is
+    # the usual cause of "Find Hub shows it but the first Locate times out"). Let it settle.
+    if cold_start:
+        _t.sleep(4)
+
     request_uuid = generate_random_uuid()
     slot = {"event": threading.Event(), "result": None}
     with _dispatch_lock:
@@ -187,6 +200,7 @@ def locate(canonic_id: str, timeout: float = 90) -> list[dict]:
         # Retry the network request on transient connectivity/DNS errors (e.g. a brief
         # "Failed to resolve android.clients.google.com" when the phone's network blips).
         last_err = None
+        t_req = _clock()
         for attempt in range(3):
             try:
                 nova_request(NOVA_ACTION_API_SCOPE, create_location_request(canonic_id, fcm_token, request_uuid))
@@ -194,14 +208,20 @@ def locate(canonic_id: str, timeout: float = 90) -> list[dict]:
                 break
             except Exception as e:
                 last_err = e
-                import time as _t
                 _t.sleep(2 * (attempt + 1))
+        t_req = _clock() - t_req
         if last_err is not None:
             raise RuntimeError("Network problem reaching Google (check internet): %s" % last_err)
         if not slot["event"].wait(timeout):
-            raise TimeoutError("Google's reply didn't arrive in %ss. The location may exist (it can show in "
-                               "Find Hub) but the push back was delayed — usually a network/FCM hiccup. "
-                               "Tap Locate now to try again." % int(timeout))
+            # Report which stage the time went to, so a failure is diagnosable instead of blank.
+            # The request reached Google (t_req returned); only Google's push back didn't arrive,
+            # which means the data likely exists (Find Hub can show it) — it's the FCM channel.
+            raise TimeoutError(
+                "Google's reply didn't arrive in %ds. The request reached Google fine "
+                "(connect %.1fs%s, send %.1fs) — only the pushed-back location was late, which is "
+                "an FCM/network delay, not a missing location. It can still show in Find Hub. "
+                "Tap Locate now again; the connection is now warm and usually answers." % (
+                    int(timeout), t_reg, " – reconnected" if cold_start else "", t_req))
     finally:
         with _dispatch_lock:
             _pending.pop(request_uuid, None)
@@ -229,7 +249,7 @@ def play_sound(canonic_id: str, start: bool = True) -> None:
     from NovaApi.nova_request import nova_request
     from NovaApi.scopes import NOVA_ACTION_API_SCOPE
 
-    fcm_token = _register_listener()
+    fcm_token, _ = _register_listener()
     nova_request(NOVA_ACTION_API_SCOPE, create_sound_request(start, canonic_id, fcm_token))
 
 

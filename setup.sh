@@ -6,6 +6,13 @@ GFMT_COMMIT=d46e9528578015b51d3b84dd91bf8f16e9ab850f
 [ -d vendor/GoogleFindMyTools ] || git clone https://github.com/leonboe1/GoogleFindMyTools vendor/GoogleFindMyTools
 git -C vendor/GoogleFindMyTools fetch --quiet origin
 git -C vendor/GoogleFindMyTools checkout --quiet "$GFMT_COMMIT"
+# Reset any earlier patch, then re-apply our reliability fixes on top of the pinned commit.
+git -C vendor/GoogleFindMyTools checkout --quiet -- .
+for p in "$PWD"/vendor-patches/*.patch; do
+  [ -e "$p" ] || continue
+  git -C vendor/GoogleFindMyTools apply "$p" || { echo "Failed to apply patch $p"; exit 1; }
+  echo "Applied $(basename "$p")"
+done
 
 [ -d .venv ] || python3 -m venv .venv
 .venv/bin/python -m pip install --upgrade pip
