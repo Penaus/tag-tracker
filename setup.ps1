@@ -8,6 +8,13 @@ if (-not (Test-Path "vendor\GoogleFindMyTools")) {
 }
 git -C vendor\GoogleFindMyTools fetch --quiet origin
 git -C vendor\GoogleFindMyTools checkout --quiet $GfmtCommit
+# Reset any earlier patch, then re-apply our reliability fixes on top of the pinned commit.
+git -C vendor\GoogleFindMyTools checkout --quiet -- .
+Get-ChildItem "vendor-patches\*.patch" | Sort-Object Name | ForEach-Object {
+    git -C vendor\GoogleFindMyTools apply $_.FullName
+    if ($LASTEXITCODE -ne 0) { throw "Failed to apply patch $($_.Name)" }
+    Write-Host "Applied $($_.Name)" -ForegroundColor Green
+}
 
 if (-not (Test-Path ".venv")) { python -m venv .venv }
 .\.venv\Scripts\python -m pip install --upgrade pip

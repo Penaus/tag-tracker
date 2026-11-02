@@ -169,8 +169,8 @@
       el.classList.add('ok'); el.textContent = 'Synced';
       el.title = `Backed up to Google Drive ${ago(b.last_run)}` + (b.mode ? ` (${b.mode})` : '');
     } else {
-      el.classList.add('busy'); el.textContent = 'Syncing…';
-      el.title = 'First Drive sync in progress…';
+      el.classList.add('off'); el.textContent = 'Drive ready';
+      el.title = 'Google Drive is set up. It uploads once there are locations to back up.';
     }
   }
 
@@ -188,6 +188,8 @@
       + `<span id="addr" class="muted">📍 finding address…</span><br>`
       + `<span class="muted">${d.point_count.toLocaleString()} locations stored in total</span>`
       + (d.last_error ? `<br><span class="error small">${esc(d.last_error)}</span>` : '');
+    el.innerHTML += `<br><a id="dir" target="_blank" rel="noopener" class="dirlink"`
+      + ` href="https://www.google.com/maps/dir/?api=1&destination=${d.last_lat},${d.last_lon}">🧭 Get directions</a>`;
     addressFor(d.last_lat, d.last_lon).then((a) => {
       const ae = $('addr'); if (ae) ae.textContent = a ? '📍 ' + a : `📍 ${d.last_lat.toFixed(5)}, ${d.last_lon.toFixed(5)}`;
     });
@@ -195,7 +197,8 @@
     if (d.last_accuracy) L.circle(ll, { radius: d.last_accuracy, color: d.color, weight: 1, fillOpacity: 0.12 }).addTo(layers.live);
     L.circleMarker(ll, { radius: 9, color: '#fff', weight: 3, fillColor: d.color, fillOpacity: 1 })
       .bindPopup(`<div class="popup"><b>${esc(d.name)} – latest</b>${fmt(d.last_ts)}<br>`
-        + `<a target="_blank" rel="noopener" href="https://www.google.com/maps?q=${d.last_lat},${d.last_lon}">Open in Google Maps</a></div>`)
+        + `<a target="_blank" rel="noopener" href="https://www.google.com/maps?q=${d.last_lat},${d.last_lon}">Open in Maps</a>`
+        + ` · <a target="_blank" rel="noopener" href="https://www.google.com/maps/dir/?api=1&destination=${d.last_lat},${d.last_lon}">Directions</a></div>`)
       .addTo(layers.live);
   }
 

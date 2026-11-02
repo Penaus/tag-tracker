@@ -1,0 +1,123 @@
+diff --git a/Auth/fcm_receiver.py b/Auth/fcm_receiver.py
+index c3259ee..1deb2b5 100644
+--- a/Auth/fcm_receiver.py
++++ b/Auth/fcm_receiver.py
+@@ -45,6 +45,7 @@ class FcmReceiver:
+ 
+         self.credentials = get_cached_value('fcm_credentials')
+         self.location_update_callbacks = []
++        self._callbacks_lock = threading.Lock()
+         self.pc = FcmPushClient(self._on_notification, fcm_config, self.credentials, self._on_credentials_updated)
+ 
+ 
+@@ -53,7 +54,9 @@ class FcmReceiver:
+         if not self._listening:
+             self._start_listener_in_background()
+ 
+-        self.location_update_callbacks.append(callback)
++        with self._callbacks_lock:
++            if callback not in self.location_update_callbacks:
++                self.location_update_callbacks.append(callback)
+ 
+         return self.credentials['fcm']['registration']['token']
+ 
+@@ -87,7 +90,9 @@ class FcmReceiver:
+             # Convert to hex string
+             hex_string = binascii.hexlify(decoded_bytes).decode('utf-8')
+ 
+-            for callback in self.location_update_callbacks:
++            with self._callbacks_lock:
++                callbacks = list(self.location_update_callbacks)
++            for callback in callbacks:
+                 callback(hex_string)
+         else:
+             print("[FCMReceiver] Payload not found in the notification.")
+diff --git a/Auth/firebase_messaging/fcmpushclient.py b/Auth/firebase_messaging/fcmpushclient.py
+index 3d4b7fc..b63eccc 100644
+--- a/Auth/firebase_messaging/fcmpushclient.py
++++ b/Auth/firebase_messaging/fcmpushclient.py
+@@ -72,6 +72,26 @@ _logger = logging.getLogger(__name__)
+ OnNotificationCallable = Callable[[dict[str, Any], str, Any], None]
+ CredentialsUpdatedCallable = Callable[[dict[str, Any]], None]
+ 
++
++def _decode_urlsafe_base64(value: str) -> bytes:
++    """Decode a urlsafe base64 string, tolerating missing '=' padding.
++    Google sometimes sends the crypto-key / salt without padding; the strict
++    decoder would raise 'Incorrect padding' and the location push would be lost."""
++    encoded = value.encode("ascii")
++    return urlsafe_b64decode(encoded + b"=" * (-len(encoded) % 4))
++
++
++def _header_parameter(value: str, name: str) -> str:
++    """Pull one parameter out of a ';'-separated header (e.g. 'dh=...;rs=4096').
++    Upstream assumed a fixed order and sliced fixed offsets, which grabbed the
++    wrong bytes whenever Google reordered, quoted, or spaced the parameters."""
++    for parameter in value.split(";"):
++        key, separator, parameter_value = parameter.strip().partition("=")
++        if separator and key.lower() == name.lower():
++            return parameter_value.strip().strip('"')
++    raise ValueError(f"Missing {name} parameter")
++
++
+ # MCS Message Types and Tags
+ MCS_MESSAGE_TAG = {
+     HeartbeatPing: 0,
+@@ -402,12 +422,12 @@ class FcmPushClient:  # pylint:disable=too-many-instance-attributes
+         salt_str: str,
+         raw_data: bytes,
+     ) -> bytes:
+-        crypto_key = urlsafe_b64decode(crypto_key_str.encode("ascii"))
+-        salt = urlsafe_b64decode(salt_str.encode("ascii"))
++        crypto_key = _decode_urlsafe_base64(crypto_key_str)
++        salt = _decode_urlsafe_base64(salt_str)
+         der_data_str = credentials["keys"]["private"]
+-        der_data = urlsafe_b64decode(der_data_str.encode("ascii") + b"========")
++        der_data = _decode_urlsafe_base64(der_data_str)
+         secret_str = credentials["keys"]["secret"]
+-        secret = urlsafe_b64decode(secret_str.encode("ascii") + b"========")
++        secret = _decode_urlsafe_base64(secret_str)
+         privkey = load_der_private_key(
+             der_data, password=None, backend=default_backend()
+         )
+@@ -449,8 +469,10 @@ class FcmPushClient:  # pylint:disable=too-many-instance-attributes
+         ):
+             # The deleted_messages message does not contain data.
+             return
+-        crypto_key = self._app_data_by_key(msg, "crypto-key")[3:]  # strip dh=
+-        salt = self._app_data_by_key(msg, "encryption")[5:]  # strip salt=
++        crypto_key = _header_parameter(
++            self._app_data_by_key(msg, "crypto-key"), "dh"
++        )
++        salt = _header_parameter(self._app_data_by_key(msg, "encryption"), "salt")
+         subtype = self._app_data_by_key(msg, "subtype")
+         if TYPE_CHECKING:
+             assert self.credentials
+diff --git a/NovaApi/nova_request.py b/NovaApi/nova_request.py
+index 8516f0c..54b0de8 100644
+--- a/NovaApi/nova_request.py
++++ b/NovaApi/nova_request.py
+@@ -26,13 +26,21 @@ def nova_request(api_scope, hex_payload):
+ 
+     payload = binascii.unhexlify(hex_payload)
+ 
+-    response = requests.post(url, headers=headers, data=payload)
++    # (connect, read) timeout: never let a stalled socket hang the whole locate forever.
++    # The read only covers Google's acknowledgement here; the location itself arrives
++    # later as an FCM push, which the caller waits for separately.
++    response = requests.post(url, headers=headers, data=payload, timeout=(10, 30))
+ 
+     if response.status_code == 200:
+         return response.content.hex()
+     else:
++        # Surface the real reason instead of returning None and later timing out blankly
++        # (e.g. a 401 means the Google token expired / the account needs re-login).
+         soup = BeautifulSoup(response.text, 'html.parser')
+-        print("[NovaRequest] Error: ", soup.get_text())
++        detail = soup.get_text().strip() or response.reason or ""
++        print("[NovaRequest] Error %s: %s" % (response.status_code, detail))
++        raise RuntimeError("Google rejected the request (HTTP %s): %s"
++                           % (response.status_code, detail[:200]))
+ 
+ 
+ if __name__ == '__main__':

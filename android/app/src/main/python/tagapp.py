@@ -197,6 +197,55 @@ def set_drive_default(on: bool):
     _save_status(drive_default=bool(on))
 
 
+def drive_status_json() -> str:
+    """Quick (no network) summary so the user can SEE their data is going to Drive:
+    which folder, when it last synced, how many locations are stored, and what gets synced."""
+    from server import db
+    s = _load_status()
+    try:
+        total = db.location_count()
+    except Exception:
+        total = 0
+    pro = False
+    try:
+        pro = license_state()["licensed"]
+    except Exception:
+        pass
+    return json.dumps({
+        "on": bool(s.get("drive_default")),
+        "folder": "TagTracker / history",
+        "last_sync": int(s.get("drive_default_last") or 0),
+        "locations": total,
+        "scope": "full history" if pro else "last 1 day (free)",
+        "error": s.get("drive_default_error") or None,
+    })
+
+
+def drive_verify_json() -> str:
+    """On-demand PROOF: actually asks Google Drive what's in TagTracker/history right now and
+    returns the real file list (name + size). Makes a network call, so it's a button, not
+    auto-run. This is how the user confirms the data truly reached Drive."""
+    from server import drive_sync, finder
+    if not finder.auth_state()["signed_in"]:
+        return json.dumps({"ok": False, "error": "Not signed in to Google yet."})
+    try:
+        client = drive_sync.DriveClient(drive_sync.token_from_login())
+        folder = client.history_folder()
+        files = []
+        total_bytes = 0
+        for f in client.list_children(folder):
+            if f.get("mimeType") == drive_sync.FOLDER_MIME:
+                continue
+            size = int(f.get("size") or 0)
+            total_bytes += size
+            files.append({"name": f.get("name"), "size": size})
+        files.sort(key=lambda x: x["name"])
+        return json.dumps({"ok": True, "folder": "TagTracker / history",
+                           "count": len(files), "bytes": total_bytes, "files": files[:50]})
+    except Exception as e:
+        return json.dumps({"ok": False, "error": str(e)})
+
+
 def locate_now(device_id: str) -> int:
     """Fetches this one tag's current location right now and saves it. Returns new-point count.
     Raises a clear error if step 2 (encryption unlock) hasn't been done."""
