@@ -169,7 +169,7 @@ def _register_listener() -> str:
     return receiver.credentials["fcm"]["registration"]["token"]
 
 
-def locate(canonic_id: str, timeout: float = 45) -> list[dict]:
+def locate(canonic_id: str, timeout: float = 90) -> list[dict]:
     """Asks Google for the tag's recent locations and returns decrypted points."""
     _ensure_imported()
     from NovaApi.ExecuteAction.LocateTracker.location_request import create_location_request
@@ -199,8 +199,9 @@ def locate(canonic_id: str, timeout: float = 45) -> list[dict]:
         if last_err is not None:
             raise RuntimeError("Network problem reaching Google (check internet): %s" % last_err)
         if not slot["event"].wait(timeout):
-            raise TimeoutError("No recent location yet — the tag hasn't been seen by a nearby phone. "
-                               "It updates when someone's Android passes near it; try again later.")
+            raise TimeoutError("Google's reply didn't arrive in %ss. The location may exist (it can show in "
+                               "Find Hub) but the push back was delayed — usually a network/FCM hiccup. "
+                               "Tap Locate now to try again." % int(timeout))
     finally:
         with _dispatch_lock:
             _pending.pop(request_uuid, None)
