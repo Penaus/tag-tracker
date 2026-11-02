@@ -34,6 +34,9 @@ public class SettingsActivity extends Activity {
 
     private LinearLayout root;
     private TextView status;
+    /** When the user taps the guided "Connect" button, chain straight into the unlock step
+     *  after sign-in succeeds, so it feels like a single login. */
+    private boolean autoUnlockAfterSignIn = false;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -106,8 +109,29 @@ public class SettingsActivity extends Activity {
         progress(signedIn, unlocked);
 
         heading("1. Connect your Google account");
-        note("Two quick steps on Google's own pages (the app never sees your password or PIN). "
-                + "Do both – locations stay hidden until step 2 is done.");
+        note("Google needs TWO things, both on Google's own pages (the app never sees your password "
+                + "or PIN): your account sign-in, and a one-time screen-lock check that releases the "
+                + "keys to DECRYPT your tag locations. Google requires that second check for end-to-end "
+                + "encryption – no app can skip it. Tap the one button below and just follow the prompts; "
+                + "it walks you through both and you won't need to repeat it. Updating the app later does "
+                + "NOT log you out.");
+
+        // One guided flow: sign-in, then automatically straight into the unlock step.
+        if (!(signedIn && unlocked)) {
+            Button connect = new Button(this);
+            connect.setText("🔗  Connect Google account (guided)");
+            connect.setAllCaps(false);
+            connect.setOnClickListener(v -> {
+                autoUnlockAfterSignIn = true;
+                if (signedIn) startAuth(GoogleAuthActivity.MODE_UNLOCK, REQ_UNLOCK);
+                else startAuth(GoogleAuthActivity.MODE_SIGN_IN, REQ_SIGN_IN);
+            });
+            LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+            clp.topMargin = dp(6);
+            root.addView(connect, clp);
+            note("Prefer to do the two steps yourself? The individual buttons are below.");
+        }
 
         // Step 1
         info((signedIn ? "✓ " : "① ") + "Step 1: Sign in"
@@ -229,6 +253,8 @@ public class SettingsActivity extends Activity {
             }).start();
         });
         if (autoDrive) {
+            showDriveSummary();
+            button("See what's in my Drive", v -> verifyDrive());
             button("Turn off automatic sync", v -> {
                 TagApp.prefs(this).edit().putBoolean(TagApp.KEY_DRIVE_AUTO, false).apply();
                 new Thread(() -> { try { TagApp.py(this).callAttr("set_drive_default", false); } catch (Exception ignored) {} }).start();
@@ -312,6 +338,68 @@ public class SettingsActivity extends Activity {
         root.addView(status);
         button("Open map", v -> { startActivity(new Intent(this, MainActivity.class)); finish(); });
         button("Help", v -> startActivity(new Intent(this, HelpActivity.class)));
+    }
+
+    /** A no-network summary line: folder, last sync, how many locations are stored. The view is
+     *  added in place now and its text filled in once the (fast, local) status is read off-thread. */
+    private void showDriveSummary() {
+        final TextView t = new TextView(this);
+        t.setText("📁 reading Drive status…");
+        t.setTextSize(14);
+        t.setPadding(0, dp(4), 0, dp(4));
+        root.addView(t);
+        new Thread(() -> {
+            String line;
+            try {
+                JSONObject s = new JSONObject(TagApp.py(this).callAttr("drive_status_json").toString());
+                long last = s.optLong("last_sync", 0);
+                String when = last > 0 ? DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT)
+                        .format(new Date(last * 1000L)) : "not yet";
+                line = "📁 " + s.optString("folder") + "  ·  " + s.optInt("locations")
+                        + " location(s) saved  ·  syncs " + s.optString("scope")
+                        + "  ·  last sync: " + when;
+                String err = s.isNull("error") ? null : s.optString("error", null);
+                if (err != null && !err.isEmpty()) line += "\n⚠ last error: " + err;
+            } catch (Exception e) {
+                line = "Drive status unavailable: " + e.getMessage();
+            }
+            final String fLine = line;
+            runOnUiThread(() -> t.setText(fLine));
+        }).start();
+    }
+
+    /** On-demand proof: ask Google Drive what's actually in TagTracker/history and show the list. */
+    private void verifyDrive() {
+        toast("Checking Google Drive…");
+        new Thread(() -> {
+            try {
+                JSONObject r = new JSONObject(TagApp.py(this).callAttr("drive_verify_json").toString());
+                if (!r.optBoolean("ok")) {
+                    toast("Couldn't read Drive: " + r.optString("error"));
+                    return;
+                }
+                StringBuilder sb = new StringBuilder();
+                sb.append("Folder: ").append(r.optString("folder")).append("\n");
+                sb.append(r.optInt("count")).append(" file(s), ")
+                        .append(r.optLong("bytes") / 1024).append(" KB total\n\n");
+                JSONArray files = r.optJSONArray("files");
+                if (files == null || files.length() == 0) {
+                    sb.append("(empty — nothing synced yet. Tap ‘Sync default folder now’.)");
+                } else {
+                    for (int i = 0; i < files.length(); i++) {
+                        JSONObject f = files.optJSONObject(i);
+                        sb.append("• ").append(f.optString("name"))
+                                .append("  (").append(f.optLong("size") / 1024).append(" KB)\n");
+                    }
+                }
+                runOnUiThread(() -> new AlertDialog.Builder(this)
+                        .setTitle("Your data in Google Drive")
+                        .setMessage(sb.toString().trim())
+                        .setPositiveButton("Close", null).show());
+            } catch (Exception e) {
+                toast("Verify failed: " + e.getMessage());
+            }
+        }).start();
     }
 
     private void pickRestoreFile() {
@@ -433,7 +521,14 @@ public class SettingsActivity extends Activity {
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
-        if (resultCode != RESULT_OK) return;
+        // Guided flow: once sign-in succeeds, go straight into the unlock step.
+        if (requestCode == REQ_SIGN_IN && resultCode == RESULT_OK && autoUnlockAfterSignIn) {
+            autoUnlockAfterSignIn = false;
+            toast("Signed in – now confirm your screen lock to unlock locations");
+            startAuth(GoogleAuthActivity.MODE_UNLOCK, REQ_UNLOCK);
+            return;
+        }
+        if (resultCode != RESULT_OK) { autoUnlockAfterSignIn = false; return; }
         if (requestCode == REQ_DRIVE_FILE && data != null && data.getData() != null) {
             Uri uri = data.getData();
             try {

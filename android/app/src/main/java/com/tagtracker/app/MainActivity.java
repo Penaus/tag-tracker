@@ -89,6 +89,7 @@ public class MainActivity extends Activity {
             try { TagApp.py(this).callAttr("set_phone_id", TagApp.deviceId(this)); } catch (Exception ignored) {}
         }).start();
         maybeRestoreFromDrive();
+        maybeCheckForUpdate();
         if (savedInstanceState != null) web.restoreState(savedInstanceState);
         else web.loadUrl("https://appassets.androidplatform.net/assets/web/index.html");
     }
@@ -230,6 +231,17 @@ public class MainActivity extends Activity {
         return e.getMessage() != null ? e.getMessage() : e.toString();
     }
 
+    /** Quiet background update check, at most once a day, so the user hears about new versions
+     *  without having to look. It only shows a dialog when a newer version actually exists. */
+    private void maybeCheckForUpdate() {
+        final String KEY = "last_update_check";
+        long now = System.currentTimeMillis();
+        long last = TagApp.prefs(this).getLong(KEY, 0);
+        if (now - last < 24 * 60 * 60 * 1000L) return;
+        TagApp.prefs(this).edit().putLong(KEY, now).apply();
+        UpdateChecker.check(this, false);
+    }
+
     @Override
     public boolean onCreateOptionsMenu(android.view.Menu menu) {
         menu.add(0, 1, 0, "Check for locations now");
@@ -237,6 +249,7 @@ public class MainActivity extends Activity {
         menu.add(0, 3, 0, "Setup & settings");
         menu.add(0, 6, 0, "Battery & activity");
         menu.add(0, 5, 0, "Tag Tracker Pro");
+        menu.add(0, 7, 0, "Check for updates");
         menu.add(0, 4, 0, "Help");
         return true;
     }
@@ -262,6 +275,10 @@ public class MainActivity extends Activity {
                 return true;
             case 6:
                 startActivity(new Intent(this, BatteryActivity.class));
+                return true;
+            case 7:
+                Toast.makeText(this, "Checking for updates…", Toast.LENGTH_SHORT).show();
+                UpdateChecker.check(this, true);
                 return true;
         }
         return super.onOptionsItemSelected(item);
