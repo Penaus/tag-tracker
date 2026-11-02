@@ -22,6 +22,17 @@ jobs:
       - name: Repo auschecken
         uses: actions/checkout@v4
 
+      - name: Fetch GoogleFindMyTools (bundled into the APK)
+        run: |
+          git clone https://github.com/leonboe1/GoogleFindMyTools vendor/GoogleFindMyTools
+          git -C vendor/GoogleFindMyTools checkout d46e9528578015b51d3b84dd91bf8f16e9ab850f
+          # Apply our FCM/location reliability fixes on top of the pinned commit.
+          for p in vendor-patches/*.patch; do
+            echo "Applying $p"
+            git -C vendor/GoogleFindMyTools apply "$GITHUB_WORKSPACE/$p"
+          done
+        working-directory: ${{ github.workspace }}
+
       - name: Docker Buildx einrichten
         uses: docker/setup-buildx-action@v3
 
