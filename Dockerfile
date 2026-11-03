@@ -6,6 +6,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends git rclone ca-c
 WORKDIR /app
 RUN git clone https://github.com/leonboe1/GoogleFindMyTools vendor/GoogleFindMyTools \
  && git -C vendor/GoogleFindMyTools checkout "$GFMT_COMMIT"
+
+COPY vendor-patches vendor-patches
+RUN for p in vendor-patches/*.patch; do \
+        echo "Applying $p" && \
+        git -C vendor/GoogleFindMyTools apply "$p" || exit 1; \
+    done
+ 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt -r vendor/GoogleFindMyTools/requirements.txt
 
