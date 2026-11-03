@@ -10,9 +10,9 @@ RUN git clone https://github.com/leonboe1/GoogleFindMyTools vendor/GoogleFindMyT
 COPY vendor-patches vendor-patches
 RUN for p in vendor-patches/*.patch; do \
         echo "Applying $p" && \
-        git -C vendor/GoogleFindMyTools apply "$p" || exit 1; \
+        git -C vendor/GoogleFindMyTools apply "/app/$p" || exit 1; \
     done
- 
+
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt -r vendor/GoogleFindMyTools/requirements.txt
 
